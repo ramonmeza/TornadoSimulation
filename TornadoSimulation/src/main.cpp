@@ -1,9 +1,13 @@
+#include <cstdlib>
+#include <ctime>
 #include <exception>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <random>
 
 #include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_glfw.h>
@@ -16,6 +20,9 @@
 const int WINDOW_WIDTH = 640;
 const int WINDOW_HEIGHT = 480;
 const int INFO_LOG_BUFFER_SIZE = 512;
+const int TEXTURE_WIDTH = 512;
+const int TEXTURE_HEIGHT = 512;
+const int NUM_PASSES = 1;
 #pragma endregion
 
 #pragma region Callbacks
@@ -36,10 +43,12 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 #pragma region Entry Point
 int main(int argc, char* argv[])
 {
+#pragma region Initialization
+	srand(static_cast<unsigned int>(time(0)));
+
 	int success;
 	char infoLog[INFO_LOG_BUFFER_SIZE];
 
-#pragma region Initialization
 #pragma region GLFW Initialization
 	if (!glfwInit())
 	{
@@ -59,6 +68,7 @@ int main(int argc, char* argv[])
 		glfwTerminate();
 		return EXIT_FAILURE;
 	}
+	glfwSwapInterval(1);
 	glfwMakeContextCurrent(window);
 
 	// configure callbacks
@@ -87,14 +97,14 @@ int main(int argc, char* argv[])
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplOpenGL3_Init();
 #pragma endregion
-#pragma endregion
 
 #pragma region Create Mesh
 	float vertices[] = {
-		 1.0f,  1.0f, 0.0f,  // top right
-		 1.0f, -1.0f, 0.0f,  // bottom right
-		-1.0f, -1.0f, 0.0f,  // bottom left
-		-1.0f,  1.0f, 0.0f   // top left 
+		// x, y, z           // u, v
+		 1.0f,  1.0f, 0.0f,  1.0f, 1.0f,  // top right
+		 1.0f, -1.0f, 0.0f,  1.0f, 0.0f,  // bottom right
+		-1.0f, -1.0f, 0.0f,  0.0f, 0.0f,  // bottom left
+		-1.0f,  1.0f, 0.0f,  0.0f, 1.0f,  // top left
 	};
 	unsigned int indices[] = {
 		0, 1, 3,   // first triangle
@@ -114,11 +124,89 @@ int main(int argc, char* argv[])
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	// x, y, z
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
+
+	// u, v
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
+#pragma endregion
+
+#pragma region Create Framebuffers
+	GLuint initFBO;
+	GLuint initTexture;
+	glGenFramebuffers(1, &initFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, initFBO);
+
+	glGenTextures(1, &initTexture);
+	glBindTexture(GL_TEXTURE_2D, initTexture);
+
+	std::vector<float> initialData(TEXTURE_WIDTH * TEXTURE_HEIGHT * 4, 1.0f);
+	for (unsigned int i = 0; i < initialData.size(); i += 4)
+	{
+		float value = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+		initialData[i]     = value;  // R
+		initialData[i + 1] = value;  // G
+		initialData[i + 2] = value;  // B
+		initialData[i + 3] = 1.0f;  // A
+	}
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, TEXTURE_WIDTH, TEXTURE_HEIGHT, 0, GL_RGBA, GL_FLOAT, initialData.data());
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, initTexture, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	unsigned int currentFBO = 0;
+	GLuint FBO[2];
+	glGenFramebuffers(2, FBO);
+
+	GLuint FBOTexture[2];
+	glGenTextures(2, FBOTexture);
+
+	for (unsigned int i = 0; i < 2; i++)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, FBO[i]);
+		glBindTexture(GL_TEXTURE_2D, FBOTexture[i]);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, TEXTURE_WIDTH, TEXTURE_HEIGHT, 0, GL_RGBA, GL_FLOAT, initialData.data());
+
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, FBOTexture[i], 0);
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			std::cerr << "Framebuffer " << i << " is not complete" << std::endl;
+
+			ImGui_ImplOpenGL3_Shutdown();
+			ImGui_ImplGlfw_Shutdown();
+			ImGui::DestroyContext();
+
+			glDeleteTextures(2, FBOTexture);
+			glDeleteFramebuffers(2, FBO);
+			glDeleteVertexArrays(1, &VAO);
+			glDeleteBuffers(1, &VBO);
+			glDeleteBuffers(1, &EBO);
+			glfwTerminate();
+
+			return EXIT_FAILURE;
+		}
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	ImTextureID initTextureId = reinterpret_cast<ImTextureID>(initTexture);
+	ImTextureID FBOTextureId0 = reinterpret_cast<ImTextureID>(FBOTexture[0]);
+	ImTextureID FBOTextureId1 = reinterpret_cast<ImTextureID>(FBOTexture[1]);
 #pragma endregion
 
 #pragma region Create Shaders
@@ -216,12 +304,13 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 #pragma endregion
+#pragma endregion
 
 #pragma region Simulation Parameter
-	float backgroundColor[] = { 0.0f, 0.0f, 0.0f };
 #pragma endregion
 
 #pragma region Main Loop
+	double prevTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window))
 	{
 #pragma region Create new ImGui frame
@@ -237,28 +326,75 @@ int main(int argc, char* argv[])
 		}
 		else
 		{
-			ImGui::Text("Test test");
-			ImGui::ColorPicker3("backgroundColor", backgroundColor);
+			if (ImGui::CollapsingHeader("Textures"))
+			{
+				ImGui::Text("Initial Texture");
+				ImGui::Image(initTextureId, ImVec2(TEXTURE_WIDTH * 0.5f, TEXTURE_HEIGHT * 0.5f));
+			}
+
+			ImGui::Spacing();
+
+			if (ImGui::CollapsingHeader("Framebuffers"))
+			{
+				ImGui::Text("Framebuffer 0");
+				ImGui::Image(FBOTextureId0, ImVec2(TEXTURE_WIDTH * 0.5f, TEXTURE_HEIGHT * 0.5f));
+
+				ImGui::Spacing();
+
+				ImGui::Text("Framebuffer 1");
+				ImGui::Image(FBOTextureId1, ImVec2(TEXTURE_WIDTH * 0.5f, TEXTURE_HEIGHT * 0.5f));
+			}
+
+
 			ImGui::End();
 		}
 #pragma endregion
 
 		glfwPollEvents();
 
-#pragma region Clear Screen
-		glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT);
+#pragma region Calculate deltaTime
+		double currTime = glfwGetTime();
+		float deltaTime = static_cast<float>(currTime - prevTime) * 1000.0f;
+		prevTime = currTime;
 #pragma endregion
 
 #pragma region Update Uniforms
 		glUseProgram(program);
-		GLint backgroundColorLocation = glGetUniformLocation(program, "backgroundColor");
-		glUniform3f(backgroundColorLocation, backgroundColor[0], backgroundColor[1], backgroundColor[2]);
+		glUniform1f(glGetUniformLocation(program, "deltaTime"), deltaTime);
 #pragma endregion
 
-#pragma region Render Mesh
+#pragma region Ping-Pong Rendering
+		for (unsigned int i = 0; i < NUM_PASSES; i++)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, FBO[currentFBO]);
+			glViewport(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+			glClear(GL_COLOR_BUFFER_BIT);
+
+			glUseProgram(program);
+
+			// this sets other FBO as the texture used as input to the simulation's previous state
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, FBO[1 - currentFBO]);
+			glUniform1i(glGetUniformLocation(program, "previousStateTexture"), 0);
+
+			// draw to this framebuffer
+			glBindVertexArray(VAO);
+			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+			currentFBO = 1 - currentFBO;
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#pragma endregion
+
+#pragma region Clear Screen
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+#pragma endregion
+
+#pragma region Render Simulation
+		glUseProgram(program);
+		glBindTexture(GL_TEXTURE_2D, FBOTexture[1 - currentFBO]);
 		glBindVertexArray(VAO);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 #pragma endregion
 
@@ -269,6 +405,13 @@ int main(int argc, char* argv[])
 
 		// swap buffer
 		glfwSwapBuffers(window);
+
+#pragma region Handle Errors
+		GLenum err;
+		while ((err = glGetError()) != GL_NO_ERROR) {
+			std::cerr << "OpenGL error: " << err << std::endl;
+		}
+#pragma endregion
 	}
 #pragma endregion
 
@@ -277,6 +420,8 @@ int main(int argc, char* argv[])
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
 
+	glDeleteTextures(2, FBOTexture);
+	glDeleteFramebuffers(2, FBO);
 	glDeleteVertexArrays(1, &VAO);
 	glDeleteBuffers(1, &VBO);
 	glDeleteBuffers(1, &EBO);

@@ -1,10 +1,15 @@
 #version 330 core
 
-out vec4 FragColor;
+uniform sampler2D previousStateTexture;
+uniform float deltaTime;
 
-uniform vec3 backgroundColor;
+in vec2 TexCoords;
+
+out vec4 FragColor;
 
 void main()
 {
-	FragColor = vec4(backgroundColor, 1.0f);
+	vec4 prevState = texture(previousStateTexture, TexCoords);
+
+	FragColor = vec4(prevState.xyz, 1.0f);
 }
