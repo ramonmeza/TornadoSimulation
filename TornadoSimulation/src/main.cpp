@@ -420,6 +420,8 @@ int main(int argc, char* argv[])
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
 
+	glDeleteTextures(1, &initTexture);
+	glDeleteFramebuffers(1, &initFBO);
 	glDeleteTextures(2, FBOTexture);
 	glDeleteFramebuffers(2, FBO);
 	glDeleteVertexArrays(1, &VAO);

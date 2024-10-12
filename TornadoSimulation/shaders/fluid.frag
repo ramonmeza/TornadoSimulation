@@ -11,5 +11,5 @@ void main()
 {
 	vec4 prevState = texture(previousStateTexture, TexCoords);
 
-	FragColor = vec4(prevState.xyz, 1.0f);
+	FragColor = vec4(prevState.rgb, 1.0f);
 }
